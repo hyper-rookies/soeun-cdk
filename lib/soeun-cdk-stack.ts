@@ -3,6 +3,9 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as path from 'path';
 import { Construct } from 'constructs';
 
 export class SoeunCdkStack extends cdk.Stack {
@@ -41,15 +44,13 @@ export class SoeunCdkStack extends cdk.Stack {
       allowAllOutbound: true,
     });
 
-    // SSH - 내 IP만 (실제 IP로 변경 필요)
     ec2Sg.addIngressRule(
-      ec2.Peer.anyIpv4(), // 아래와 같이 본인 IP로 변경하기
+      ec2.Peer.anyIpv4(),
       // ec2.Peer.ipv4('x.x.x.x/32'),
       ec2.Port.tcp(22),
       'Allow SSH'
     );
 
-    // Spring Boot 포트
     ec2Sg.addIngressRule(
       ec2.Peer.anyIpv4(),
       ec2.Port.tcp(8080),
@@ -80,7 +81,6 @@ export class SoeunCdkStack extends cdk.Stack {
         ec2.InstanceClass.T3,
         ec2.InstanceSize.SMALL
       ),
-      // Ubuntu 24.04 LTS
       machineImage: ec2.MachineImage.fromSsmParameter(
         '/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id'
       ),
@@ -109,7 +109,6 @@ export class SoeunCdkStack extends cdk.Stack {
     // 7. DynamoDB
     // ───────────────────────────────
 
-    // 7-1. ad_accounts
     new dynamodb.TableV2(this, 'SeAdAccounts', {
       tableName: 'se_ad_accounts',
       partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
@@ -117,8 +116,7 @@ export class SoeunCdkStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    // 7-2. conversations
-    const conversationsTable = new dynamodb.TableV2(this, 'SeConversations', {
+    new dynamodb.TableV2(this, 'SeConversations', {
       tableName: 'se_conversations',
       partitionKey: { name: 'conversationId', type: dynamodb.AttributeType.STRING },
       billing: dynamodb.Billing.onDemand(),
@@ -131,7 +129,6 @@ export class SoeunCdkStack extends cdk.Stack {
       ],
     });
 
-    // 7-3. messages
     new dynamodb.TableV2(this, 'SeMessages', {
       tableName: 'se_messages',
       partitionKey: { name: 'messageId', type: dynamodb.AttributeType.STRING },
@@ -145,7 +142,6 @@ export class SoeunCdkStack extends cdk.Stack {
       ],
     });
 
-    // 7-4. reports
     new dynamodb.TableV2(this, 'SeReports', {
       tableName: 'se_reports',
       partitionKey: { name: 'reportId', type: dynamodb.AttributeType.STRING },
@@ -161,6 +157,91 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
+    // 8. Cognito
+    // ───────────────────────────────
+
+    const userPool = new cognito.UserPool(this, 'SeReportUserPool', {
+      userPoolName: 'se-report-userpool',
+      selfSignUpEnabled: false,
+      signInAliases: { email: true },
+      autoVerify: { email: true },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // Cognito 도메인
+    userPool.addDomain('SeReportDomain', {
+      cognitoDomain: { domainPrefix: 'se-report' },
+    });
+
+    // Google IdP
+    const googleProvider = new cognito.UserPoolIdentityProviderGoogle(this, 'SeReportGoogle', {
+      userPool,
+      clientId: process.env.GOOGLE_CLIENT_ID || '',
+      clientSecretValue: cdk.SecretValue.unsafePlainText(process.env.GOOGLE_CLIENT_SECRET || ''),
+      scopes: ['email', 'openid', 'profile'],
+      attributeMapping: {
+        email: cognito.ProviderAttribute.GOOGLE_EMAIL,
+        fullname: cognito.ProviderAttribute.GOOGLE_NAME,
+      },
+    });
+
+    // App client - SPA (프론트엔드용)
+    userPool.addClient('SeReportAppSpa', {
+      userPoolClientName: 'se-report-app',
+      generateSecret: false,
+      supportedIdentityProviders: [
+        cognito.UserPoolClientIdentityProvider.GOOGLE,
+      ],
+      oAuth: {
+        flows: { authorizationCodeGrant: true },
+        scopes: [
+          cognito.OAuthScope.EMAIL,
+          cognito.OAuthScope.OPENID,
+          cognito.OAuthScope.PROFILE,
+        ],
+        callbackUrls: ['http://localhost:3000/callback'],
+        logoutUrls: ['http://localhost:3000'],
+      },
+    });
+
+    // App client - 서버용 (Lambda용, Client Secret 있음)
+    const serverClient = userPool.addClient('SeReportAppServer', {
+      userPoolClientName: 'se-report-server',
+      generateSecret: true,
+      supportedIdentityProviders: [
+        cognito.UserPoolClientIdentityProvider.GOOGLE,
+      ],
+      oAuth: {
+        flows: { authorizationCodeGrant: true },
+        scopes: [
+          cognito.OAuthScope.EMAIL,
+          cognito.OAuthScope.OPENID,
+          cognito.OAuthScope.PROFILE,
+        ],
+        callbackUrls: ['http://localhost:3000/callback'],
+        logoutUrls: ['http://localhost:3000'],
+      },
+    });
+
+    // ───────────────────────────────
+    // 9. 인증 Lambda
+    // ───────────────────────────────
+
+    const authLambda = new lambda.Function(this, 'SeAuthLambda', {
+      functionName: 'se-auth-lambda',
+      runtime: lambda.Runtime.NODEJS_22_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/auth')),
+      environment: {
+        COGNITO_DOMAIN: `https://se-report.auth.ap-northeast-2.amazoncognito.com`,
+        CLIENT_ID: serverClient.userPoolClientId,
+        // CLIENT_SECRET: serverClient.userPoolClientSecret.unsafeUnwrap(), // cdk deploy 시 주석 해제
+        REDIRECT_URI: 'http://localhost:3000/callback',
+      },
+      timeout: cdk.Duration.seconds(10),
+    });
+
+    // ───────────────────────────────
     // Output
     // ───────────────────────────────
     new cdk.CfnOutput(this, 'EC2PublicIp', {
@@ -171,6 +252,16 @@ export class SoeunCdkStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'EcrRepositoryUri', {
       value: repo.repositoryUri,
       description: 'ECR Repository URI',
+    });
+
+    new cdk.CfnOutput(this, 'UserPoolId', {
+      value: userPool.userPoolId,
+      description: 'Cognito User Pool ID',
+    });
+
+    new cdk.CfnOutput(this, 'UserPoolClientId', {
+      value: serverClient.userPoolClientId,
+      description: 'Cognito App Client ID (server)',
     });
   }
 }
