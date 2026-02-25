@@ -40,9 +40,10 @@ export class SoeunCdkStack extends cdk.Stack {
       allowAllOutbound: true,
     });
 
-    // SSH - 내 IP만 허용
+    // SSH - 내 IP만 (실제 IP로 변경 필요)
     ec2Sg.addIngressRule(
-      ec2.Peer.anyIpv4(), // 본인 IP로 필요: ec2.Peer.ipv4('x.x.x.x/32')
+      ec2.Peer.anyIpv4(), // 아래와 같이 본인 IP로 변경하기
+      // ec2.Peer.ipv4('x.x.x.x/32'),
       ec2.Port.tcp(22),
       'Allow SSH'
     );
@@ -89,7 +90,7 @@ export class SoeunCdkStack extends cdk.Stack {
       keyPair: ec2.KeyPair.fromKeyPairName(this, 'KeyPair', 'se-report-key'),
     });
 
-    // ───────────────────────────────
+        // ───────────────────────────────
     // 5. ECR
     // ───────────────────────────────
     const repo = new ecr.Repository(this, 'SeReportEcr', {
@@ -101,7 +102,7 @@ export class SoeunCdkStack extends cdk.Stack {
     // ───────────────────────────────
     // 6. S3
     // ───────────────────────────────
-
+ 
 
     // ───────────────────────────────
     // Output
@@ -115,5 +116,6 @@ export class SoeunCdkStack extends cdk.Stack {
       value: repo.repositoryUri,
       description: 'ECR Repository URI',
     });
+
   }
 }
