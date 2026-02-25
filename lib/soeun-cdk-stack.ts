@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import { Construct } from 'constructs';
 
 export class SoeunCdkStack extends cdk.Stack {
@@ -90,7 +91,7 @@ export class SoeunCdkStack extends cdk.Stack {
       keyPair: ec2.KeyPair.fromKeyPairName(this, 'KeyPair', 'se-report-key'),
     });
 
-        // ───────────────────────────────
+    // ───────────────────────────────
     // 5. ECR
     // ───────────────────────────────
     const repo = new ecr.Repository(this, 'SeReportEcr', {
@@ -102,7 +103,62 @@ export class SoeunCdkStack extends cdk.Stack {
     // ───────────────────────────────
     // 6. S3
     // ───────────────────────────────
- 
+
+
+    // ───────────────────────────────
+    // 7. DynamoDB
+    // ───────────────────────────────
+
+    // 7-1. ad_accounts
+    new dynamodb.TableV2(this, 'SeAdAccounts', {
+      tableName: 'se_ad_accounts',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      billing: dynamodb.Billing.onDemand(),
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // 7-2. conversations
+    const conversationsTable = new dynamodb.TableV2(this, 'SeConversations', {
+      tableName: 'se_conversations',
+      partitionKey: { name: 'conversationId', type: dynamodb.AttributeType.STRING },
+      billing: dynamodb.Billing.onDemand(),
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      globalSecondaryIndexes: [
+        {
+          indexName: 'userId-index',
+          partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+        },
+      ],
+    });
+
+    // 7-3. messages
+    new dynamodb.TableV2(this, 'SeMessages', {
+      tableName: 'se_messages',
+      partitionKey: { name: 'messageId', type: dynamodb.AttributeType.STRING },
+      billing: dynamodb.Billing.onDemand(),
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      globalSecondaryIndexes: [
+        {
+          indexName: 'conversationId-index',
+          partitionKey: { name: 'conversationId', type: dynamodb.AttributeType.STRING },
+        },
+      ],
+    });
+
+    // 7-4. reports
+    new dynamodb.TableV2(this, 'SeReports', {
+      tableName: 'se_reports',
+      partitionKey: { name: 'reportId', type: dynamodb.AttributeType.STRING },
+      billing: dynamodb.Billing.onDemand(),
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      globalSecondaryIndexes: [
+        {
+          indexName: 'userId-index',
+          partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'expiresAt', type: dynamodb.AttributeType.STRING },
+        },
+      ],
+    });
 
     // ───────────────────────────────
     // Output
@@ -116,6 +172,5 @@ export class SoeunCdkStack extends cdk.Stack {
       value: repo.repositoryUri,
       description: 'ECR Repository URI',
     });
-
   }
 }
