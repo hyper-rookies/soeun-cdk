@@ -39,14 +39,14 @@ def save_to_s3_and_register_partition(df, platform, table_name, date_info):
     """Parquet으로 변환 후 S3 저장 + Glue 파티션 등록"""
     key = (
         f"raw/{platform}/"
-        f"year={date_info['year']}/"
-        f"month={date_info['month']}/"
+        f"year={date_info['year']}/" 
+        f"month_p={date_info['month']}/"
         f"day={date_info['day']}/"
         f"data.parquet"
     )
     s3_location = (
         f"s3://{S3_BUCKET_NAME}/raw/{platform}/"
-        f"year={date_info['year']}/month={date_info['month']}/day={date_info['day']}/"
+        f"year={date_info['year']}/month_p={date_info['month']}/day={date_info['day']}/"
     )
 
     # Parquet 변환 후 S3 저장

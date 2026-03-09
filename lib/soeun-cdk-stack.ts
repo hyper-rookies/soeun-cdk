@@ -55,7 +55,6 @@ export class SoeunCdkStack extends cdk.Stack {
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonAthenaFullAccess'),
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FullAccess'),
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonDynamoDBFullAccess'),
-        // [수정] Cognito 토큰 검증(JWKS 조회)을 위해 추가
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonCognitoPowerUser'),
       ],
     });
@@ -175,7 +174,6 @@ export class SoeunCdkStack extends cdk.Stack {
       oAuth: {
         flows: { authorizationCodeGrant: true },
         scopes: [cognito.OAuthScope.EMAIL, cognito.OAuthScope.OPENID, cognito.OAuthScope.PROFILE],
-        // [수정] 실제 운영 콜백 URL 반영
         callbackUrls: [
           'http://localhost:3000/auth/callback',
           'https://soeun-report-frontend.vercel.app/auth/callback',
@@ -195,7 +193,6 @@ export class SoeunCdkStack extends cdk.Stack {
       oAuth: {
         flows: { authorizationCodeGrant: true },
         scopes: [cognito.OAuthScope.EMAIL, cognito.OAuthScope.OPENID, cognito.OAuthScope.PROFILE],
-        // [수정] 실제 운영 콜백 URL 반영
         callbackUrls: [
           'http://localhost:3000/auth/callback',
           'https://soeun-report-frontend.vercel.app/auth/callback',
@@ -216,10 +213,12 @@ export class SoeunCdkStack extends cdk.Stack {
       handler: 'index.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/auth')),
       environment: {
-        // [수정] 실제 Cognito 도메인으로 변경
         COGNITO_DOMAIN: 'https://ap-northeast-2bzej4aji8.auth.ap-northeast-2.amazoncognito.com',
         CLIENT_ID: serverClient.userPoolClientId,
-        REDIRECT_URI: 'http://localhost:3000/auth/callback',
+        CLIENT_SECRET: serverClient.userPoolClientSecret.unsafeUnwrap(),
+        // [수정] 로컬/프로덕션 분리
+        REDIRECT_URI_LOCAL: 'http://localhost:3000/auth/callback',
+        REDIRECT_URI_PROD: 'https://soeun-report-frontend.vercel.app/auth/callback',
       },
       timeout: cdk.Duration.seconds(10),
     });
@@ -380,7 +379,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 16. 리포트 Lambda (report/function.py) [Phase 5 추가]
+    // 16. 리포트 Lambda (report/function.py)
     // 매주 월요일 08:00 KST = UTC 일요일 23:00
     // ───────────────────────────────
     const reportLambdaRole = new iam.Role(this, 'SeReportLambdaRole', {
@@ -451,7 +450,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 17. Athena 워크그룹 [추가]
+    // 17. Athena 워크그룹
     // ───────────────────────────────
     new athena.CfnWorkGroup(this, 'SeReportAthenaWorkgroup', {
       name: 'se-report-workgroup',
@@ -473,7 +472,6 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     const googleColumns = [
-      // 메타 컬럼
       { name: 'camp_id', type: 'string' },
       { name: 'camp_name', type: 'string' },
       { name: 'camp_advertising_channel_type', type: 'string' },
@@ -497,13 +495,11 @@ export class SoeunCdkStack extends cdk.Stack {
       { name: 'quarter', type: 'string' },
       { name: 'day_of_week', type: 'string' },
       { name: 'week', type: 'string' },
-      // 성과 컬럼 (bigint)
       { name: 'impressions', type: 'bigint' },
       { name: 'clicks', type: 'bigint' },
       { name: 'video_views', type: 'bigint' },
       { name: 'all_conversions', type: 'bigint' },
       { name: 'conversions', type: 'bigint' },
-      // 성과 컬럼 (double)
       { name: 'cost_micros', type: 'double' },
       { name: 'ctr', type: 'double' },
       { name: 'average_cpc', type: 'double' },
@@ -519,7 +515,6 @@ export class SoeunCdkStack extends cdk.Stack {
     ];
 
     const kakaoColumns = [
-      // 메타 컬럼
       { name: 'kwd_id', type: 'string' },
       { name: 'kwd_name', type: 'string' },
       { name: 'kwd_config', type: 'string' },
@@ -536,7 +531,6 @@ export class SoeunCdkStack extends cdk.Stack {
       { name: 'lu_mobile', type: 'string' },
       { name: 'basic_date', type: 'string' },
       { name: 'adv_id', type: 'string' },
-      // 성과 컬럼 (bigint)
       { name: 'kwd_bid_amount', type: 'bigint' },
       { name: 'imp', type: 'bigint' },
       { name: 'click', type: 'bigint' },
@@ -554,7 +548,6 @@ export class SoeunCdkStack extends cdk.Stack {
       { name: 'conv_signup_7d', type: 'bigint' },
       { name: 'conv_app_install_1d', type: 'bigint' },
       { name: 'conv_app_install_7d', type: 'bigint' },
-      // 성과 컬럼 (double)
       { name: 'spending', type: 'double' },
       { name: 'ctr', type: 'double' },
       { name: 'ppc', type: 'double' },
@@ -564,7 +557,7 @@ export class SoeunCdkStack extends cdk.Stack {
 
     const partitionKeys = [
       { name: 'year', type: 'string' },
-      { name: 'month', type: 'string' },
+      { name: 'month_p', type: 'string' },
       { name: 'day', type: 'string' },
     ];
 
