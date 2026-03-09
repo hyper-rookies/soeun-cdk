@@ -10,7 +10,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as glue from 'aws-cdk-lib/aws-glue';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as scheduler from 'aws-cdk-lib/aws-scheduler';
-import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as athena from 'aws-cdk-lib/aws-athena';
 import * as path from 'path';
 import { Construct } from 'constructs';
 
@@ -55,6 +55,8 @@ export class SoeunCdkStack extends cdk.Stack {
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonAthenaFullAccess'),
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FullAccess'),
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonDynamoDBFullAccess'),
+        // [수정] Cognito 토큰 검증(JWKS 조회)을 위해 추가
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonCognitoPowerUser'),
       ],
     });
 
@@ -115,7 +117,6 @@ export class SoeunCdkStack extends cdk.Stack {
       }],
     });
 
-    // se_messages: conversationId-createdAt-index (정렬키 추가)
     new dynamodb.TableV2(this, 'SeMessages', {
       tableName: 'se_messages',
       partitionKey: { name: 'messageId', type: dynamodb.AttributeType.STRING },
@@ -166,6 +167,7 @@ export class SoeunCdkStack extends cdk.Stack {
       },
     });
 
+    // SPA 클라이언트 (secret 없음, 프론트엔드용 - 현재 미사용)
     userPool.addClient('SeReportAppSpa', {
       userPoolClientName: 'se-report-app',
       generateSecret: false,
@@ -173,11 +175,19 @@ export class SoeunCdkStack extends cdk.Stack {
       oAuth: {
         flows: { authorizationCodeGrant: true },
         scopes: [cognito.OAuthScope.EMAIL, cognito.OAuthScope.OPENID, cognito.OAuthScope.PROFILE],
-        callbackUrls: ['http://localhost:3000/callback'],
-        logoutUrls: ['http://localhost:3000'],
+        // [수정] 실제 운영 콜백 URL 반영
+        callbackUrls: [
+          'http://localhost:3000/auth/callback',
+          'https://soeun-report-frontend.vercel.app/auth/callback',
+        ],
+        logoutUrls: [
+          'http://localhost:3000',
+          'https://soeun-report-frontend.vercel.app',
+        ],
       },
     });
 
+    // 서버 클라이언트 (secret 있음, Spring Boot 백엔드용)
     const serverClient = userPool.addClient('SeReportAppServer', {
       userPoolClientName: 'se-report-server',
       generateSecret: true,
@@ -185,13 +195,20 @@ export class SoeunCdkStack extends cdk.Stack {
       oAuth: {
         flows: { authorizationCodeGrant: true },
         scopes: [cognito.OAuthScope.EMAIL, cognito.OAuthScope.OPENID, cognito.OAuthScope.PROFILE],
-        callbackUrls: ['http://localhost:3000/callback'],
-        logoutUrls: ['http://localhost:3000'],
+        // [수정] 실제 운영 콜백 URL 반영
+        callbackUrls: [
+          'http://localhost:3000/auth/callback',
+          'https://soeun-report-frontend.vercel.app/auth/callback',
+        ],
+        logoutUrls: [
+          'http://localhost:3000',
+          'https://soeun-report-frontend.vercel.app',
+        ],
       },
     });
 
     // ───────────────────────────────
-    // 9. 인증 Lambda
+    // 9. 인증 Lambda (auth/index.mjs)
     // ───────────────────────────────
     const authLambda = new lambda.Function(this, 'SeAuthLambda', {
       functionName: 'se-auth-lambda',
@@ -199,60 +216,16 @@ export class SoeunCdkStack extends cdk.Stack {
       handler: 'index.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/auth')),
       environment: {
-        COGNITO_DOMAIN: 'https://se-report.auth.ap-northeast-2.amazoncognito.com',
+        // [수정] 실제 Cognito 도메인으로 변경
+        COGNITO_DOMAIN: 'https://ap-northeast-2bzej4aji8.auth.ap-northeast-2.amazoncognito.com',
         CLIENT_ID: serverClient.userPoolClientId,
-        REDIRECT_URI: 'http://localhost:3000/callback',
+        REDIRECT_URI: 'http://localhost:3000/auth/callback',
       },
       timeout: cdk.Duration.seconds(10),
     });
 
     // ───────────────────────────────
-    // 10. API Gateway
-    // ───────────────────────────────
-    const api = new apigateway.RestApi(this, 'SeReportApi', {
-      restApiName: 'se-report-api',
-      endpointTypes: [apigateway.EndpointType.REGIONAL],
-      defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
-        allowMethods: apigateway.Cors.ALL_METHODS,
-      },
-    });
-
-    const cognitoAuthorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'SeReportAuthorizer', {
-      authorizerName: 'se-cognito-authorizer',
-      cognitoUserPools: [userPool],
-    });
-
-    // EC2 프록시 통합 (Spring Boot)
-    const ec2Integration = new apigateway.HttpIntegration(
-      `http://${instance.instancePublicIp}:8080/{proxy}`,
-      {
-        httpMethod: 'ANY',
-        options: {
-          requestParameters: {
-            'integration.request.path.proxy': 'method.request.path.proxy',
-          },
-        },
-      }
-    );
-
-    const apiProxy = api.root.addResource('{proxy+}');
-    apiProxy.addMethod('ANY', ec2Integration, {
-      authorizer: cognitoAuthorizer,
-      authorizationType: apigateway.AuthorizationType.COGNITO,
-      requestParameters: {
-        'method.request.path.proxy': true,
-      },
-    });
-
-    const authResource = api.root.addResource('auth');
-    const lambdaIntegration = new apigateway.LambdaIntegration(authLambda);
-    authResource.addResource('token').addMethod('POST', lambdaIntegration);
-    authResource.addResource('refresh').addMethod('POST', lambdaIntegration);
-    authResource.addResource('logout').addMethod('POST', lambdaIntegration);
-
-    // ───────────────────────────────
-    // 11. SQS (배치 파이프라인)
+    // 10. SQS (배치 파이프라인)
     // ───────────────────────────────
     const batchDlq = new sqs.Queue(this, 'SeBatchDlq', {
       queueName: 'se-batch-dlq',
@@ -270,7 +243,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 12. Lambda IAM Role - 배치용
+    // 11. IAM Role - 배치 Lambda용
     // ───────────────────────────────
     const batchLambdaRole = new iam.Role(this, 'SeBatchLambdaRole', {
       roleName: 'se-batch-lambda-role',
@@ -283,11 +256,13 @@ export class SoeunCdkStack extends cdk.Stack {
       ],
     });
 
-    // 배치 Lambda
+    // ───────────────────────────────
+    // 12. 배치 Lambda (batch/function.py)
+    // ───────────────────────────────
     const batchLambda = new lambda.Function(this, 'SeBatchLambda', {
       functionName: 'se-batch-lambda',
       runtime: lambda.Runtime.PYTHON_3_12,
-      handler: 'lambda_function.lambda_handler',
+      handler: 'function.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/batch')),
       role: batchLambdaRole,
       timeout: cdk.Duration.minutes(5),
@@ -316,7 +291,7 @@ export class SoeunCdkStack extends cdk.Stack {
     }));
 
     // ───────────────────────────────
-    // 13. DLQ Lambda
+    // 13. DLQ Lambda (dlq/function.py)
     // ───────────────────────────────
     const dlqLambdaRole = new iam.Role(this, 'SeDlqLambdaRole', {
       roleName: 'se-dlq-lambda-role',
@@ -331,7 +306,7 @@ export class SoeunCdkStack extends cdk.Stack {
     const dlqLambda = new lambda.Function(this, 'SeDlqLambda', {
       functionName: 'se-dlq-lambda',
       runtime: lambda.Runtime.PYTHON_3_12,
-      handler: 'lambda_function.lambda_handler',
+      handler: 'function.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/dlq')),
       role: dlqLambdaRole,
       timeout: cdk.Duration.seconds(30),
@@ -343,9 +318,8 @@ export class SoeunCdkStack extends cdk.Stack {
     }));
 
     // ───────────────────────────────
-    // 14. EventBridge Scheduler
+    // 14. IAM Role - EventBridge Scheduler용
     // ───────────────────────────────
-    // 스케줄 그룹 생성
     const scheduleGroup = new scheduler.CfnScheduleGroup(this, 'SeScheduleGroup', {
       name: 'soeun',
     });
@@ -365,13 +339,16 @@ export class SoeunCdkStack extends cdk.Stack {
       },
     });
 
-    // 매일 새벽 3시 KST (UTC 18:00)
-    const scheduleExpression = 'cron(0 18 * * ? *)';
+    // ───────────────────────────────
+    // 15. EventBridge Scheduler - 배치
+    // 매일 새벽 3시 KST = UTC 18:00
+    // ───────────────────────────────
+    const batchScheduleExpression = 'cron(0 18 * * ? *)';
 
     new scheduler.CfnSchedule(this, 'SeBatchScheduleGoogle', {
       name: 'se-batch-schedule-google',
       groupName: scheduleGroup.name,
-      scheduleExpression,
+      scheduleExpression: batchScheduleExpression,
       flexibleTimeWindow: { mode: 'OFF' },
       target: {
         arn: batchQueue.queueArn,
@@ -388,7 +365,7 @@ export class SoeunCdkStack extends cdk.Stack {
     new scheduler.CfnSchedule(this, 'SeBatchScheduleKakao', {
       name: 'se-batch-schedule-kakao',
       groupName: scheduleGroup.name,
-      scheduleExpression,
+      scheduleExpression: batchScheduleExpression,
       flexibleTimeWindow: { mode: 'OFF' },
       target: {
         arn: batchQueue.queueArn,
@@ -403,7 +380,92 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 15. Glue
+    // 16. 리포트 Lambda (report/function.py) [Phase 5 추가]
+    // 매주 월요일 08:00 KST = UTC 일요일 23:00
+    // ───────────────────────────────
+    const reportLambdaRole = new iam.Role(this, 'SeReportLambdaRole', {
+      roleName: 'se-report-lambda-role',
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonBedrockFullAccess'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonAthenaFullAccess'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FullAccess'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonDynamoDBFullAccess'),
+      ],
+    });
+
+    const reportLambda = new lambda.Function(this, 'SeReportLambda', {
+      functionName: 'se-report-lambda',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'function.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/report')),
+      role: reportLambdaRole,
+      timeout: cdk.Duration.minutes(5),
+      layers: [
+        lambda.LayerVersion.fromLayerVersionArn(
+          this, 'AWSSDKPandasLayerReport',
+          'arn:aws:lambda:ap-northeast-2:336392948345:layer:AWSSDKPandas-Python312:16'
+        ),
+      ],
+      environment: {
+        BEDROCK_MODEL_ID: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        DYNAMODB_REPORTS_TABLE: 'se_reports',
+        ATHENA_DATABASE: 'se_report_db',
+        ATHENA_WORKGROUP: 'se-report-workgroup',
+        S3_BUCKET_NAME: adDataBucket.bucketName,
+      },
+    });
+
+    // 리포트 Lambda EventBridge Scheduler Role
+    const reportSchedulerRole = new iam.Role(this, 'SeReportSchedulerRole', {
+      roleName: 'se-report-eventbridge-role',
+      assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com'),
+      inlinePolicies: {
+        InvokeLambdaPolicy: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              actions: ['lambda:InvokeFunction'],
+              resources: [reportLambda.functionArn],
+            }),
+          ],
+        }),
+      },
+    });
+
+    // 매주 월요일 08:00 KST (UTC 일요일 23:00)
+    new scheduler.CfnSchedule(this, 'SeWeeklyReportSchedule', {
+      name: 'se-weekly-report-schedule',
+      groupName: scheduleGroup.name,
+      scheduleExpression: 'cron(0 23 ? * SUN *)',
+      flexibleTimeWindow: { mode: 'OFF' },
+      target: {
+        arn: reportLambda.functionArn,
+        roleArn: reportSchedulerRole.roleArn,
+        input: JSON.stringify({ type: 'weekly_report' }),
+        retryPolicy: {
+          maximumRetryAttempts: 2,
+          maximumEventAgeInSeconds: 3600,
+        },
+      },
+    });
+
+    // ───────────────────────────────
+    // 17. Athena 워크그룹 [추가]
+    // ───────────────────────────────
+    new athena.CfnWorkGroup(this, 'SeReportAthenaWorkgroup', {
+      name: 'se-report-workgroup',
+      workGroupConfiguration: {
+        resultConfiguration: {
+          outputLocation: `s3://${adDataBucket.bucketName}/athena-results/`,
+        },
+        enforceWorkGroupConfiguration: true,
+        publishCloudWatchMetricsEnabled: true,
+      },
+    });
+
+    // ───────────────────────────────
+    // 18. Glue
     // ───────────────────────────────
     const glueDb = new glue.CfnDatabase(this, 'SeReportGlueDb', {
       catalogId: this.account,
@@ -457,7 +519,7 @@ export class SoeunCdkStack extends cdk.Stack {
     ];
 
     const kakaoColumns = [
-      // 메타 컬럼 (keyword_master 조인)
+      // 메타 컬럼
       { name: 'kwd_id', type: 'string' },
       { name: 'kwd_name', type: 'string' },
       { name: 'kwd_config', type: 'string' },
@@ -564,13 +626,17 @@ export class SoeunCdkStack extends cdk.Stack {
       value: userPool.userPoolId,
       description: 'Cognito User Pool ID',
     });
-    new cdk.CfnOutput(this, 'ApiGatewayUrl', {
-      value: api.url,
-      description: 'API Gateway URL',
-    });
     new cdk.CfnOutput(this, 'BatchQueueUrl', {
       value: batchQueue.queueUrl,
       description: 'Batch SQS Queue URL',
+    });
+    new cdk.CfnOutput(this, 'ReportLambdaArn', {
+      value: reportLambda.functionArn,
+      description: 'Weekly Report Lambda ARN',
+    });
+    new cdk.CfnOutput(this, 'AthenaWorkgroup', {
+      value: 'se-report-workgroup',
+      description: 'Athena Workgroup Name',
     });
   }
 }
