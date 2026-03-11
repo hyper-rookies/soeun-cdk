@@ -2,7 +2,7 @@
 - [백엔드 레포지토리](https://github.com/hyper-rookies/soeun-chat)
 - [프론트엔드 레포지토리](https://github.com/hyper-rookies/soeun-report-frontend)
 - [인프라 레포지토리](https://github.com/hyper-rookies/soeun-cdk)
-
+- [계획서](https://github.com/hyper-rookies/soeun-cdk/blob/main/%EC%9E%90%EC%97%B0%EC%96%B4%EB%A6%AC%ED%8F%AC%ED%8A%B8%EC%83%9D%EC%84%B1%EA%B3%BC%EC%A0%9C_%EA%B3%84%ED%9A%8D%EC%84%9C_%EC%9D%B4%EC%86%8C%EC%9D%80_%EC%A0%9C%EC%B6%9C%EC%9A%A9.pdf)
 
 ## 🛠️ 기술 스택
 
