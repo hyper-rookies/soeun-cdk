@@ -11,6 +11,7 @@ import * as glue from 'aws-cdk-lib/aws-glue';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as athena from 'aws-cdk-lib/aws-athena';
+import * as elasticache from 'aws-cdk-lib/aws-elasticache';
 import * as path from 'path';
 import { Construct } from 'constructs';
 
@@ -33,7 +34,28 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 2. 보안그룹 - EC2용
+    // 2. VPC Gateway 엔드포인트 (S3, DynamoDB)
+    // EC2 → S3/DynamoDB 트래픽을 AWS 내부망으로 라우팅
+    // 인터넷 데이터 전송 비용 제거 및 보안 강화
+    // ───────────────────────────────
+    vpc.addGatewayEndpoint('SeReportS3Endpoint', {
+      service: ec2.GatewayVpcEndpointAwsService.S3,
+      subnets: [
+        { subnetType: ec2.SubnetType.PUBLIC },
+        { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      ],
+    });
+
+    vpc.addGatewayEndpoint('SeReportDynamoDbEndpoint', {
+      service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
+      subnets: [
+        { subnetType: ec2.SubnetType.PUBLIC },
+        { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      ],
+    });
+
+    // ───────────────────────────────
+    // 3. 보안그룹 - EC2용
     // ───────────────────────────────
     const ec2Sg = new ec2.SecurityGroup(this, 'SeReportEc2Sg', {
       securityGroupName: 'se-report-ec2-sg',
@@ -45,7 +67,19 @@ export class SoeunCdkStack extends cdk.Stack {
     ec2Sg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(8080), 'Allow Spring Boot');
 
     // ───────────────────────────────
-    // 3. IAM Role - EC2용
+    // 4. 보안그룹 - ElastiCache Redis용
+    // EC2 보안그룹에서만 6379 접근 허용
+    // ───────────────────────────────
+    const redisSg = new ec2.SecurityGroup(this, 'SeReportRedisSg', {
+      securityGroupName: 'se-report-elasticache-sg',
+      vpc,
+      description: 'Security group for ElastiCache Redis',
+      allowAllOutbound: false,
+    });
+    redisSg.addIngressRule(ec2Sg, ec2.Port.tcp(6379), 'Allow Redis from EC2');
+
+    // ───────────────────────────────
+    // 5. IAM Role - EC2용
     // ───────────────────────────────
     const ec2Role = new iam.Role(this, 'SeReportEc2Role', {
       roleName: 'se-report-ec2-role',
@@ -60,7 +94,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 4. EC2
+    // 6. EC2
     // ───────────────────────────────
     const instance = new ec2.Instance(this, 'SeReportEc2', {
       instanceName: 'se-report-ec2',
@@ -76,7 +110,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 5. ECR
+    // 7. ECR
     // ───────────────────────────────
     const repo = new ecr.Repository(this, 'SeReportEcr', {
       repositoryName: 'se-report-server',
@@ -85,7 +119,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 6. S3
+    // 8. S3
     // ───────────────────────────────
     const adDataBucket = new s3.Bucket(this, 'SeReportAdData', {
       bucketName: 'se-report-ad-data',
@@ -93,10 +127,68 @@ export class SoeunCdkStack extends cdk.Stack {
       encryption: s3.BucketEncryption.S3_MANAGED,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
+      lifecycleRules: [
+        // excel/: presigned URL 1시간 만료 후 불필요한 파일 1일 후 삭제
+        {
+          id: 'delete-excel-exports',
+          prefix: 'excel/',
+          expiration: cdk.Duration.days(1),
+        },
+        // athena-results/: Athena 내부 동작용 임시 파일 7일 후 삭제
+        {
+          id: 'delete-athena-results',
+          prefix: 'athena-results/',
+          expiration: cdk.Duration.days(7),
+        },
+        // reports/: 주간리포트는 조회 빈도 낮아지면 저비용 스토리지로 아카이빙
+        // (삭제 대신 아카이빙 - 과거 리포트 조회 기능 유지)
+        // Glacier Instant Retrieval: 즉시 접근 가능하여 사용자 경험 영향 없음
+        {
+          id: 'archive-reports',
+          prefix: 'reports/',
+          transitions: [
+            {
+              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+              transitionAfter: cdk.Duration.days(90),
+            },
+            {
+              storageClass: s3.StorageClass.GLACIER_INSTANT_RETRIEVAL,
+              transitionAfter: cdk.Duration.days(365),
+            },
+          ],
+        },
+      ],
     });
 
     // ───────────────────────────────
-    // 7. DynamoDB
+    // 9. ElastiCache Redis
+    // Caffeine(JVM 로컬 캐시) → ElastiCache Redis 전환
+    // Private Subnet 배치로 보안 강화
+    // 향후 ECS 전환 및 스케일 아웃 대비
+    // ───────────────────────────────
+    const privateSubnetIds = vpc.selectSubnets({
+      subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+    }).subnetIds;
+
+    const redisSubnetGroup = new elasticache.CfnSubnetGroup(this, 'SeReportRedisSubnetGroup', {
+      cacheSubnetGroupName: 'se-report-redis-subnet-group',
+      description: 'Subnet group for se-report Redis',
+      subnetIds: privateSubnetIds,
+    });
+
+    const redisCluster = new elasticache.CfnCacheCluster(this, 'SeReportRedis', {
+      clusterName: 'se-report-redis',
+      engine: 'redis',
+      engineVersion: '7.1',
+      cacheNodeType: 'cache.t4g.micro',
+      numCacheNodes: 1,
+      cacheSubnetGroupName: redisSubnetGroup.cacheSubnetGroupName,
+      vpcSecurityGroupIds: [redisSg.securityGroupId],
+    });
+    redisCluster.addDependency(redisSubnetGroup);
+
+    // ───────────────────────────────
+    // 10. DynamoDB
     // ───────────────────────────────
     new dynamodb.TableV2(this, 'SeAdAccounts', {
       tableName: 'se_ad_accounts',
@@ -141,7 +233,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 8. Cognito
+    // 11. Cognito
     // ───────────────────────────────
     const userPool = new cognito.UserPool(this, 'SeReportUserPool', {
       userPoolName: 'se-report-userpool',
@@ -205,7 +297,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 9. 인증 Lambda (auth/index.mjs)
+    // 12. 인증 Lambda (auth/index.mjs)
     // ───────────────────────────────
     const authLambda = new lambda.Function(this, 'SeAuthLambda', {
       functionName: 'se-auth-lambda',
@@ -216,7 +308,6 @@ export class SoeunCdkStack extends cdk.Stack {
         COGNITO_DOMAIN: 'https://ap-northeast-2bzej4aji8.auth.ap-northeast-2.amazoncognito.com',
         CLIENT_ID: serverClient.userPoolClientId,
         CLIENT_SECRET: serverClient.userPoolClientSecret.unsafeUnwrap(),
-        // [수정] 로컬/프로덕션 분리
         REDIRECT_URI_LOCAL: 'http://localhost:3000/auth/callback',
         REDIRECT_URI_PROD: 'https://soeun-report-frontend.vercel.app/auth/callback',
       },
@@ -224,7 +315,37 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 10. SQS (배치 파이프라인)
+    // 13. IAM Role - Excel Lambda용
+    // ───────────────────────────────
+    const excelLambdaRole = new iam.Role(this, 'SeExcelLambdaRole', {
+      roleName: 'se-excel-lambda-role',
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FullAccess'),
+      ],
+    });
+
+    // ───────────────────────────────
+    // 14. Excel Export Lambda (excel_report/lambda_function.py)
+    // S3에서 리포트 JSON 로드 → Excel 생성 → S3 업로드 → presigned URL 반환
+    // presigned URL 만료: 1시간 / S3 excel/ 파일 만료: 1일 (Lifecycle 정책)
+    // ───────────────────────────────
+    const excelLambda = new lambda.Function(this, 'SeExcelLambda', {
+      functionName: 'se-excel-lambda',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'lambda_function.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/excel_report')),
+      role: excelLambdaRole,
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 512,
+      environment: {
+        S3_BUCKET: adDataBucket.bucketName,
+      },
+    });
+
+    // ───────────────────────────────
+    // 15. SQS (배치 파이프라인)
     // ───────────────────────────────
     const batchDlq = new sqs.Queue(this, 'SeBatchDlq', {
       queueName: 'se-batch-dlq',
@@ -242,7 +363,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 11. IAM Role - 배치 Lambda용
+    // 16. IAM Role - 배치 Lambda용
     // ───────────────────────────────
     const batchLambdaRole = new iam.Role(this, 'SeBatchLambdaRole', {
       roleName: 'se-batch-lambda-role',
@@ -256,7 +377,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 12. 배치 Lambda (batch/function.py)
+    // 17. 배치 Lambda (batch/function.py)
     // ───────────────────────────────
     const batchLambda = new lambda.Function(this, 'SeBatchLambda', {
       functionName: 'se-batch-lambda',
@@ -290,7 +411,7 @@ export class SoeunCdkStack extends cdk.Stack {
     }));
 
     // ───────────────────────────────
-    // 13. DLQ Lambda (dlq/function.py)
+    // 18. DLQ Lambda (dlq/function.py)
     // ───────────────────────────────
     const dlqLambdaRole = new iam.Role(this, 'SeDlqLambdaRole', {
       roleName: 'se-dlq-lambda-role',
@@ -317,7 +438,7 @@ export class SoeunCdkStack extends cdk.Stack {
     }));
 
     // ───────────────────────────────
-    // 14. IAM Role - EventBridge Scheduler용
+    // 19. IAM Role - EventBridge Scheduler용
     // ───────────────────────────────
     const scheduleGroup = new scheduler.CfnScheduleGroup(this, 'SeScheduleGroup', {
       name: 'soeun',
@@ -339,7 +460,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 15. EventBridge Scheduler - 배치
+    // 20. EventBridge Scheduler - 배치
     // 매일 새벽 3시 KST = UTC 18:00
     // ───────────────────────────────
     const batchScheduleExpression = 'cron(0 18 * * ? *)';
@@ -379,7 +500,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 16. 리포트 Lambda (report/function.py)
+    // 21. 리포트 Lambda (report/function.py)
     // 매주 월요일 08:00 KST = UTC 일요일 23:00
     // ───────────────────────────────
     const reportLambdaRole = new iam.Role(this, 'SeReportLambdaRole', {
@@ -450,7 +571,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 17. Athena 워크그룹
+    // 22. Athena 워크그룹
     // ───────────────────────────────
     new athena.CfnWorkGroup(this, 'SeReportAthenaWorkgroup', {
       name: 'se-report-workgroup',
@@ -464,7 +585,7 @@ export class SoeunCdkStack extends cdk.Stack {
     });
 
     // ───────────────────────────────
-    // 18. Glue
+    // 23. Glue
     // ───────────────────────────────
     const glueDb = new glue.CfnDatabase(this, 'SeReportGlueDb', {
       catalogId: this.account,
@@ -630,6 +751,14 @@ export class SoeunCdkStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'AthenaWorkgroup', {
       value: 'se-report-workgroup',
       description: 'Athena Workgroup Name',
+    });
+    new cdk.CfnOutput(this, 'RedisEndpoint', {
+      value: redisCluster.attrRedisEndpointAddress,
+      description: 'ElastiCache Redis Endpoint',
+    });
+    new cdk.CfnOutput(this, 'ExcelLambdaArn', {
+      value: excelLambda.functionArn,
+      description: 'Excel Export Lambda ARN',
     });
   }
 }

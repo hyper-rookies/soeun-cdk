@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import traceback
 import boto3
@@ -12,6 +13,9 @@ from openpyxl.utils import get_column_letter
 
 # ─── 환경변수 ───
 S3_BUCKET = os.environ.get('S3_BUCKET', '')
+
+# ─── 날짜 패턴 (YYYY-MM-DD) ───  ← [수정 1] DATE_PAT 전역 정의 추가
+DATE_PAT = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 # ─── 색상 상수 ───
 BLUE_DARK    = "1E3A5F"
@@ -372,7 +376,6 @@ def build_daily(ws, report: dict, data: dict):
         apply_header(ws.cell(row=3, column=col, value=h))
 
     # ── 날짜별 집계 ──
-    # line 데이터: 구글/카카오 광고비
     date_map: dict[str, dict] = {}
     for row in line_rows:
         d = row.get('날짜', '')
@@ -600,7 +603,6 @@ def build_kakao(ws, data: dict):
 
     # ── 파이 차트: 매체별 광고비 비중 (pie 데이터 전체) ──
     if len(pie_rows) >= 2:
-        # 요약 시트의 B15:B16을 직접 참조하지 않고 현 시트에 데이터 작성 후 차트 연결
         ws['A9'].value  = "▶ 매체별 광고비 비중 (참고)"
         ws['A9'].font   = _font(bold=True, color=KAKAO_DARK, size=12)
         for col, h in enumerate(["매체", "광고비(원)"], start=1):
@@ -651,6 +653,8 @@ def lambda_handler(event, context):
             ),
         }
 
+    local_path = f"/tmp/report_{conversation_id}.xlsx"  # ← [수정 2] 경로 미리 선언 (finally에서 참조)
+
     # ── 1. S3에서 리포트 JSON 로드 ──
     try:
         report = load_report_from_s3(conversation_id)
@@ -688,7 +692,6 @@ def lambda_handler(event, context):
         build_kakao(ws4, data)
 
         # ── 4. /tmp 저장 ──
-        local_path = f"/tmp/report_{conversation_id}.xlsx"
         wb.save(local_path)
         print(f"Excel 저장: {local_path}")
 
@@ -719,3 +722,9 @@ def lambda_handler(event, context):
             'statusCode': 500,
             'body': json.dumps({'error': 'PARSE_ERROR', 'message': str(e)}, ensure_ascii=False),
         }
+
+    finally:
+        # ── [수정 2] /tmp 파일 정리 ──
+        if os.path.exists(local_path):
+            os.remove(local_path)
+            print(f"/tmp 정리 완료: {local_path}")
