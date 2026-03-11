@@ -3,7 +3,182 @@
 - [프론트엔드 레포지토리](https://github.com/hyper-rookies/soeun-report-frontend)
 - [인프라 레포지토리](https://github.com/hyper-rookies/soeun-cdk)
 ---
+# 👨‍💻 화면
+### 🚩 로그인
+<img width="2559" height="1345" alt="fe-auth" src="https://github.com/user-attachments/assets/18f04b5d-be8b-4bfc-af1f-3e7a38df605d" />
 
+- 구글 로그인을 지원합니다. 
+- 로그인한 사용자만 채팅에 참여할 수 있습니다.
+
+<br>
+<img width="2553" height="1298" alt="login-progress" src="https://github.com/user-attachments/assets/ef8bd357-6e99-4864-ba2b-2e306243b634" />
+
+- 로그인 진행중일 시, 프로그레스 바가 표시됩니다.
+- 프로그레스 바가 이동하며, 시간별로 TIP을 제공하는 문구가 표시됩니다.
+- 예시) TIP! 주간리포트 엑셀로 내보내기 기능을 활용해보세요.
+
+<br>
+<br>
+
+### 🚩 홈
+
+<img width="2559" height="1349" alt="login-home-접음" src="https://github.com/user-attachments/assets/f4c8f5aa-5bd4-4d10-87be-03fd21a85433" />
+
+- 좌측의 사이드바를 접고 펼 수 있습니다.
+- 사이드바의 메뉴는 hover시 툴팁을 제공합니다. 
+- 오전/오후/저녁/새벽 시간대에 따라서 '사용자명 + 시간대별 문구'를 제공합니다.
+- 제공되는 3개의 질문을 선택하면 채팅방으로 이동되며, input 창에 선택 질문이 자동 입력됩니다.
+- '직접 질문하기' 또는 '사이드바 > 새 채팅'을 클릭하여 새로운 채팅방을 열 수 있습니다.
+<br>
+<br>
+
+### 🚩 채팅
+
+<img width="2554" height="1339" alt="fe-chat-loading" src="https://github.com/user-attachments/assets/6407d096-a519-4583-9f6f-9b92dde889f7" />
+
+- 채팅을 입력하면, AI 의 답변을 기다리는동안 상태를 알리는 문구가 출력됩니다.
+<br>
+<img width="2559" height="1344" alt="fe-chat-answer1" src="https://github.com/user-attachments/assets/71c49b9e-d0c3-462e-a468-30ae2513eb55" />
+<img width="2557" height="1298" alt="fe-chat-answer2" src="https://github.com/user-attachments/assets/795bc759-4098-4ae5-be17-893e25b027b5" />
+
+- 질문을 자연어로 전송하면 답변이 스트리밍 방식으로 한 글자씩 출력됩니다.
+- SSE로 받은 텍스트를 타이핑 애니메이션 효과를 주면서 출력합니다.
+- 받은 청크 단위의 텍스트를 바로 화면에 노출시키지 않고, 16MS 타이머가 돌면서 누적했다가 한 글자씩 출력합니다. 이를 통해 네트워크 속도와 무관하게 일정한 타이핑 속도처럼 보이도록 합니다.
+- 단, 답변 속도 향상을 위해 SSE 스트림이 끝나면 타이핑 애니메이션을 멈추고 답변 전체를 즉시 반환합니다. 이를 통해 스트림이 다 왔는데 타이머가 한 글자씩 따라가느라 사용자를 기다리게 하는 상황을 방지합니다.
+- 최소로딩 시간을 5000MS로 지정합니다. 첫 청크가 도착해도 5초가 지나지 않았다면 로딩 스피너를 유지합니다. 이를 통해 서버에서 AI를 활용해 DB를 조회하는 시간동안 텍스트가 거의 오지 않다가 갑자기 확 쏟아지는 경우를 방지합니다. 즉, 사용자에게 DB 조회 시간이 단축된 것처럼 보이게 합니다.
+<br>
+<img width="2555" height="1305" alt="fe- chat-answer-chart" src="https://github.com/user-attachments/assets/7685b9be-dfde-4da6-85d3-dc1bcd994d50" />
+
+- 표 형태 뿐만 아니라, 차트 형태도 표현할 수 있습니다.
+- AI가 사용자의 질문에 따라 어떤 형식(표/차트/없음 중 선택)으로 답변을 제공할 지 의사결정을 내립니다.
+
+<br>
+
+<img width="2557" height="1297" alt="fe-chat-greeting" src="https://github.com/user-attachments/assets/6f03db84-db64-440c-9f7b-f96ce135354d" />
+<img width="2555" height="1300" alt="fe-chat-greeting2" src="https://github.com/user-attachments/assets/19515ff9-6515-4cc6-a5c4-927cf99b9a4f" />
+
+- 광고와 무관한 질문에도 답변할 수 있으나, 광고와 아무런 상관이 없는 질문을 한 경우나 개인정보를 입력한 경우 광고 분야로의 질문을 자연스럽게 유도합니다.
+
+<br>
+<br>
+
+### 🚩 사이드바 메뉴
+
+<img width="2554" height="1339" alt="sidebar-tool-menu" src="https://github.com/user-attachments/assets/469d1cfb-93d2-45e4-af4f-18f86361d2bc" />
+
+- 사이드바에서는 여러가지 메뉴를 제공합니다.
+
+<br>
+<br>
+
+### 🚩 채팅방 이름 수정
+
+<img width="2548" height="1341" alt="fe-sidebar-revise" src="https://github.com/user-attachments/assets/78781620-ef63-4c4d-87a0-6f3df122b5de" />
+
+- 채팅방 이름은 첫 질문으로 자동 생성되지만, 이름을 수정할 수 있습니다.
+
+<br>
+
+<img width="2552" height="1347" alt="fe-sidebar-delete" src="https://github.com/user-attachments/assets/b15e72b1-ccca-427c-8c62-6006c1f0e17f" />
+
+- 채팅방은 삭제할 수 있으며, 삭제 후에는 완료되었다는 토스트 메시지가 제공됩니다.
+
+<br>
+<br>
+
+### 🚩 채팅방 공유 링크 생성
+
+<img width="2556" height="1298" alt="fe-sidebar-share" src="https://github.com/user-attachments/assets/e2cf4c5a-218b-4516-9ee7-5c06348f4a90" />
+<img width="2554" height="1304" alt="fe-sidebar-share-green" src="https://github.com/user-attachments/assets/d9c417ed-e6ea-4c2f-9e34-6d3955339ecd" />
+
+- 채팅방에 대해 공유 링크(유효기간 30일)를 생성할 수 있으며, 클릭을 통해 클립보드에 간편하게 복사할 수 있습니다.
+- '유효기간'은 사용자가 공유 링크를 조회한 순간으로부터 30일을 의미합니다.
+  
+<br>
+
+<img width="2557" height="1345" alt="fe-sidebar-search" src="https://github.com/user-attachments/assets/ebf0c209-d328-40a0-a8ec-5d88076cce8e" />
+
+- 로그인하지 않은 사용자도 공유 링크를 통해 채팅방을 조회할 수 있습니다.
+- 읽기 전용 모드이며, 각종 기능이 제한됩니다.
+
+<br>
+<br>
+
+### 🚩 대화 검색
+<img width="2557" height="1345" alt="fe-sidebar-search" src="https://github.com/user-attachments/assets/368b40de-559c-4fac-b867-00f7937cfef8" />
+
+- 사이드바는 대화 검색 기능을 제공합니다.
+- 채팅방 이름을 기준으로 검색할 수 있습니다.
+
+<br>
+<br>
+
+### 🚩 대시보드
+
+<img width="2554" height="1343" alt="fe-dashboard" src="https://github.com/user-attachments/assets/61c0c175-10de-407b-890e-69d4972c6304" />
+<img width="2553" height="1347" alt="fe-dashboard-hover" src="https://github.com/user-attachments/assets/48131e95-185a-48ce-8810-b9cd51a3d303" />
+
+- 대시보드를 통해 광고 현황을 한 눈에 확인할 수 있습니다. 
+- 오늘의 광고비, 이번 주 광고비, ROAS, CPC, CTR, 매체별 광고비 비충, 최근 7일 전환 추이 등이 제공됩니다.
+- 그래프에 hover 시, 상세 수치를 확인할 수 있습니다.
+- 대시보드 데이터는 캐싱되며, 2회 이상 접근 시 조회 성능이 향상됩니다.
+
+<br>
+<br>
+
+### 🚩 주간 리포트
+
+<img width="2552" height="1343" alt="fe-sidebar-report-hover" src="https://github.com/user-attachments/assets/58f2f1e5-9982-4576-aa89-0a1f804f6754" />
+
+- 사이드바를 통해 주간 리포트 목록을 확인할 수 있습니다.
+- 사이드바를 펼친 채 주간 리포트 버튼에 hover할 시, 주간리포트 생성 시간이 툴팁을 통해 표시됩니다.
+
+<br>
+
+<img width="2556" height="1353" alt="fe-report-hover" src="https://github.com/user-attachments/assets/74c9ff52-1df2-4f84-b86d-ac238d6fa8d1" />
+
+- 그래프에 hover 시, 상세 수치를 확인할 수 있습니다.
+
+<br>
+
+<img width="2553" height="1351" alt="fe-report-filtering" src="https://github.com/user-attachments/assets/e0ee0e14-acc9-48fb-979b-664019ed43d3" />
+
+- 매체와 기간을 선택하여 그래프를 조회할 수 있습니다.
+
+<br>
+
+<img width="2552" height="1291" alt="fe-report-2" src="https://github.com/user-attachments/assets/acb6f9a6-676c-4962-8330-9c1779b85905" />
+
+<img width="2556" height="1302" alt="fe-report-3" src="https://github.com/user-attachments/assets/4209814f-4196-4dee-bfb6-c30a3e85096c" />
+
+- 일별 상세 지표, 성과 요약, 주요 인사이트, 개선 제안을 제공합니다.
+
+<br>
+
+<img width="2553" height="1343" alt="fe-rerpot-3-filter" src="https://github.com/user-attachments/assets/81b98a76-a7d5-4853-8485-b2dac7ae326d" />
+
+- 상세 데이터는 정렬/검색 기능을 제공합니다.
+
+<br>
+
+<img width="1900" height="1016" alt="excel1" src="https://github.com/user-attachments/assets/bc1bbe34-9cc0-4c70-86e2-5207d972d767" />
+
+- 주간리포트는 Excel로 내보내기 기능이 제공됩니다.
+- 총 4개의 시트가 생성됩니다. (요약, 일별추이, 구글상세, 카카오 상세)
+- 필터링과 차트를 자동 제공합니다. 이를 통해, 사용자는 raw 데이터를 직접 가공하고 Excel 함수를 작성할 필요가 없습니다.
+
+<br>
+
+<img width="274" height="242" alt="sidebar-report-1" src="https://github.com/user-attachments/assets/cc0470cb-18dc-4990-aae3-036f3a2186c8" />
+<img width="272" height="295" alt="sidebar-report-2" src="https://github.com/user-attachments/assets/984a9df6-1c6a-4366-9bb2-be000ee84b0d" />
+
+- 주간 리포트는 사이드바를 통해 월별로 조회할 수 있습니다.
+- 년도를 선택하면, 월 선택 화면으로 이동합니다.
+
+<br>
+<br>
+
+---
 # 🏗️ AWS 아키텍처
 <img width="4261" height="2274" alt="1차과제-아키텍처-20260311" src="https://github.com/user-attachments/assets/c68e6fbc-62f8-4502-9a90-28d3e8544748" />
 
