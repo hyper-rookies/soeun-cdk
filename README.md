@@ -72,10 +72,7 @@
 <img width="2557" height="1298" alt="fe-chat-answer2" src="https://github.com/user-attachments/assets/795bc759-4098-4ae5-be17-893e25b027b5" />
 
 - 질문을 자연어로 전송하면 답변이 스트리밍 방식으로 한 글자씩 출력됩니다.
-- SSE로 받은 텍스트를 타이핑 애니메이션 효과를 주면서 출력합니다.
-- 받은 청크 단위의 텍스트를 바로 화면에 노출시키지 않고, 16MS 타이머가 돌면서 누적했다가 한 글자씩 출력합니다. 이를 통해 네트워크 속도와 무관하게 일정한 타이핑 속도처럼 보이도록 합니다.
-- 단, 답변 속도 향상을 위해 SSE 스트림이 끝나면 타이핑 애니메이션을 멈추고 답변 전체를 즉시 반환합니다. 이를 통해 스트림이 다 왔는데 타이머가 한 글자씩 따라가느라 사용자를 기다리게 하는 상황을 방지합니다.
-- 최소로딩 시간을 5000MS로 지정합니다. 첫 청크가 도착해도 5초가 지나지 않았다면 로딩 스피너를 유지합니다. 이를 통해 서버에서 AI를 활용해 DB를 조회하는 시간동안 텍스트가 거의 오지 않다가 갑자기 확 쏟아지는 경우를 방지합니다. 즉, 사용자에게 DB 조회 시간이 단축된 것처럼 보이게 합니다.
+
 <br>
 <img width="2555" height="1305" alt="fe- chat-answer-chart" src="https://github.com/user-attachments/assets/7685b9be-dfde-4da6-85d3-dc1bcd994d50" />
 
@@ -264,7 +261,7 @@ CSV 원본 데이터 (카카오 키워드, 구글 Ads)
   → Spring Boot (EC2/Docker)
   → Amazon Bedrock (Claude) — Tool Use 패턴, API 호출 방식 (Spring Boot에서 Loop최대 5회)
   → Athena → S3 쿼리 실행
-  → SSE 스트리밍으로 응답 반환
+  → SSE 응답 반환
 ```
 
 ### [주간 리포트 자동화]
