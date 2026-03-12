@@ -180,6 +180,7 @@
 <img width="2552" height="1343" alt="fe-sidebar-report-hover" src="https://github.com/user-attachments/assets/58f2f1e5-9982-4576-aa89-0a1f804f6754" />
 
 - 사이드바를 통해 주간 리포트 목록을 확인할 수 있습니다.
+- 주간리포트도 채팅방과 동일하게 읽기 전용 링크를 공유할 수 있습니다.
 - 사이드바를 펼친 채 주간 리포트 버튼에 hover할 시, 주간리포트 생성 시간이 툴팁을 통해 표시됩니다.
 
 <br>
