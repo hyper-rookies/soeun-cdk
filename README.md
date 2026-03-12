@@ -239,7 +239,7 @@
 EventBridge Scheduler (매일 03:00 KST)
   → SQS (se-batch-queue) — 재시도 최대 3회
   → Lambda (se-batch-lambda)
-  → Google Ads API / Kakao Keyword API 호출
+  → Google Ads API / Kakao Moment API 호출
   → S3 (raw/google/, raw/kakao/) — Parquet + Snappy 압축
   → Glue 파티션 등록 (year/month_p/day)
   → Athena 쿼리 가능 상태
